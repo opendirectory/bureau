@@ -3,9 +3,16 @@ daemon: true
 update_interval: 5
 restart_service_on_change: true
 
-server: ldap://10.10.0.94
+server: ldap://10.10.0.94     # the certificate must be valid for this host/IP
 binddn: cn=bureau,ou=services,dc=example,dc=com
 password: SomeSecretPassword
 base: ou=config,dc=example,dc=com
 host_specific_entries: true
 override_hostname: someOtherCN
+tls_skip_verify: false        # true disables certificate checks (insecure)
+
+kubernetes:
+  enabled: false
+  kubeconfig:              # default: the pod's service account credentials
+  namespace:               # default: the pod's namespace
+  configmap_prefix: bureau

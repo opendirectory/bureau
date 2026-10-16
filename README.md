@@ -17,10 +17,11 @@ Bureau can be used with your own LDAP server or with the managed LDAP platform h
 
 1. Install bureau on the target system.
 
-2. Start bureau in daemon mode or with systemd:
+2. Start bureau in daemon mode, with systemd, or as a Windows service:
 ```
 ./bureau &                               # daemon
 systemctl enable --now bureau.service    # systemd
+bureau.exe install && bureau.exe start   # Windows (elevated prompt)
 ```
 
 3. View the test file:
@@ -93,15 +94,24 @@ password: SomeSecretPassword
 base: ou=config,dc=example,dc=com
 host_specific_entries: true
 override_hostname:
+tls_skip_verify: false
 ```
 
 **Location**
 
-The bureau configuration is looked for in these locations in order of precedence:
-- same directory as the binary
+The bureau configuration is read from `-config <path>` if given. Otherwise it is looked for in these locations in order of precedence:
+- `bureau.yaml` in the current working directory
+- `bureau.yaml` in the same directory as the binary
 - ~/.bureau.yaml
 - ~/.config/bureau/bureau.yaml
-- /etc/bureau/bureau.yaml
+- Linux: /etc/bureau/bureau.yaml
+- Windows: `%APPDATA%\bureau\bureau.yaml`, then `%ProgramData%\bureau\bureau.yaml`
+
+**TLS**
+
+Bureau always encrypts the LDAP connection, using `ldaps://` or StartTLS for `ldap://`. The server certificate is checked against the system trust store, and it must be valid for the host or IP address in `server`. To trust a private CA, add it to the system trust store (the certificate store on Windows).
+
+`tls_skip_verify: true` turns off certificate checks. Only use it for testing: anyone who can intercept the connection can read the bind password.
 
 **Daemon Mode**
 
@@ -113,6 +123,76 @@ This settings indicates that all relevant config files for the current host are 
 
 In some cases it is useful to specify an identical set of config files for multiple systems. This can be achieved by setting an `override_hostname`. This option designates the CommonName used when searching for config files. For example, setting `override_hostname` to `desktop` will search for config files under `cn=desktop,ou=config,dc=example,dc=com`.
 
+**Kubernetes ConfigMaps**
+
+When enabled, every LDAP object synced also gets published as a ConfigMap:
+```yaml
+kubernetes:
+  enabled: true
+  kubeconfig:              # default: the pod's service account credentials
+  namespace:               # default: the pod's namespace
+  configmap_prefix: bureau
+```
+
+By default, bureau authenticates with the pod's service account and writes to the pod's namespace. `$KUBECONFIG` and `~/.kube/config` are ignored. To run outside a cluster, set `kubeconfig` to a kubeconfig file. Its current context (and that context's namespace, unless `namespace` is set) is used.
+
+- The ConfigMap name is the prefix plus the RDN values below `base`, e.g. `cn=bureau,cn=web01,ou=config,dc=example,dc=com` becomes `bureau-web01-bureau`.
+- The data key is the file name from `path` (e.g. `bureau.txt`).
+- When several entries share the same `path`, the ConfigMap holds the whole generated file and is named after the first entry.
+- ConfigMaps are published even if the file can't be written to the local filesystem, such as a read-only path inside a pod.
+- The source DN, path, permissions, and `modifyTimestamp` are stored as `bureau.slapcat.github.com/*` annotations. The ConfigMap is only updated when these change.
+- Bureau only updates ConfigMaps labeled `app.kubernetes.io/managed-by=bureau`. It won't overwrite other ConfigMaps.
+- The service account needs `get`, `create`, and `update` on `configmaps` in the target namespace.
+
+**File Paths**
+
+`path` must be absolute. A leading `~` expands to the home directory of the user running bureau.
+
+- **Permissions:** `permissions` takes an octal mode (default `0600`). Setuid, setgid and sticky bits (e.g. `4755`) are supported.
+- **Atomic updates:** files are written to `<path>.tmp` and then moved into place, so readers never see a partial file.
+- **Parent directories:** the directory must already exist.
+
+# Windows
+
+Bureau runs on Windows too. Paths may use either slash and are case-insensitive:
+- `C:\ProgramData\app\app.ini` or `C:/ProgramData/app/app.ini`
+- `%APPDATA%\app\settings.json`: environment variables are expanded.
+- `\\server\share\app.ini`: UNC paths work.
+- `/tmp/bureau.txt`: a path with no drive letter goes on the system drive (`C:\tmp\bureau.txt`).
+
+On Windows, `permissions` only controls the read-only attribute: modes without the owner write bit (e.g. `0444`) make the file read-only. Use NTFS ACLs on the parent directory to control who can read the files. Bureau clears the read-only attribute when it replaces a file. If another program has the file open, bureau retries for a few seconds and tries again on the next sync.
+
+## Windows service
+
+Bureau can install itself as a native Windows service. Run these from an elevated (administrator) prompt:
+
+```
+bureau.exe -config C:\ProgramData\bureau\bureau.yaml install
+bureau.exe start
+bureau.exe stop
+bureau.exe uninstall
+```
+
+1. Extract the release zip to a folder only administrators can write to, such as `C:\Program Files\bureau`. The service runs whatever binary is at that path as `LocalSystem`, so a user-writable folder would let any user run code as `SYSTEM`. The keepalived templates are loaded from the `templates` folder next to `bureau.exe`.
+2. Create `bureau.yaml`, for example in `C:\ProgramData\bureau\` or next to `bureau.exe`.
+3. Run `install`, then `start`. `install` registers a service named `bureau` ("Bureau configuration agent") that:
+   - starts automatically at boot (delayed start, so the network is more likely to be up);
+   - runs as `LocalSystem`, so it can write machine-wide paths (a leading `~` in `path` expands to `C:\Windows\System32\config\systemprofile`);
+   - is restarted automatically if it fails (after 5 s, 30 s, then every minute);
+   - stores `-config` in the service command line, if given. Relative paths are made absolute, since services start in `C:\Windows\System32`. Without `-config`, the usual locations are searched, including next to `bureau.exe` and `%ProgramData%\bureau\bureau.yaml`.
+
+As a service, bureau always runs in daemon mode, even if the config says `daemon: false`. On stop or shutdown it lets a sync in progress finish for up to 15 seconds. Files are replaced atomically, so stopping never leaves a half-written file.
+
+If the config file is missing or invalid, `start` fails straight away with the reason. To change the config, edit the file and run `bureau.exe stop` and `bureau.exe start`. To change `-config`, run `uninstall` and then `install` again.
+
+Logs go to the Application event log under the source `bureau`. Errors and warnings are always logged; set `debug: true` to also log each sync. To view the latest entries from PowerShell:
+
+```powershell
+Get-WinEvent -FilterHashtable @{LogName='Application'; ProviderName='bureau'} -MaxEvents 20
+```
+
+`sc.exe`, `services.msc` and PowerShell's `Start-Service`/`Stop-Service` work as well, since this is a standard service.
+
 # Built-in Schemas
 
 - configFile
@@ -121,3 +201,12 @@ In some cases it is useful to specify an identical set of config files for multi
   - keepalivedGlobalConfig
   - keepalivedVRRPGroupConfig
   - keepalivedVRRPInstanceConfig
+
+Several entries can share the same `path` (e.g. a global, group and instance entry all writing `/etc/keepalived/keepalived.conf`). Their output is combined in LDAP order, and the whole file is regenerated whenever any of them changes.
+
+Keepalived templates are loaded from the first of these that exists:
+- `./templates/keepalived`
+- `templates/keepalived` next to the binary
+- `~/.config/bureau/templates/keepalived`
+- Linux: `/etc/bureau/templates/keepalived`, then `/usr/share/bureau/templates/keepalived`
+- Windows: `%ProgramData%\bureau\templates\keepalived`

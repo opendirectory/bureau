@@ -3,7 +3,7 @@ global_defs {
 		{{range .GlobalNotificationEmail}}{{.}}
 		{{end}}
 	}{{end}}
-	{{if .GlobalNotificationEmail}}notification_email_from {{.GlobalNotificationEmailFrom}}{{end}}
+	{{if .GlobalNotificationEmailFrom}}notification_email_from {{.GlobalNotificationEmailFrom}}{{end}}
 	{{if .GlobalSMTPServer}}smtp_server {{.GlobalSMTPServer}}{{end}}
 	{{if .GlobalSMTPConnectTimeout}}smtp_connect_timeout {{.GlobalSMTPConnectTimeout}}{{end}}
 	{{if .GlobalLVSId}}lvs_id {{.GlobalLVSId}}{{end}}

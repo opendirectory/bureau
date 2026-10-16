@@ -20,11 +20,11 @@ vrrp_instance {{.InstanceName}} {
 		{{range .VirtualIPAddress}}{{.}}
 	{{end -}}
 	}
-	{{if .VirtualIPAddressExcluded}}}virtual_ipaddress_excluded {
-	  {{range .VirtualIPAddressExcluded}}{{.}}
+	{{if .VirtualIPAddressExcluded}}virtual_ipaddress_excluded {
+		{{range .VirtualIPAddressExcluded}}{{.}}
 		{{end -}}
-	}{{end -}}
-	{{if .NotifyMasterVRRPInstance}}notify_master {{.NotifyMasterVRRPInstance}}{{end -}}
-	{{if .NotifyBackupVRRPInstance}}notify_backup {{.NotifyBackupVRRPInstance}}{{end -}}
+	}{{end}}
+	{{if .NotifyMasterVRRPInstance}}notify_master {{.NotifyMasterVRRPInstance}}{{end}}
+	{{if .NotifyBackupVRRPInstance}}notify_backup {{.NotifyBackupVRRPInstance}}{{end}}
 	{{if .NotifyFaultVRRPInstance}}notify_fault {{.NotifyFaultVRRPInstance}}{{end}}
 }

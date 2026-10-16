@@ -10,7 +10,27 @@ permissions:
   contents: write
 
 jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Test
+        run: |
+          go vet ./...
+          go test ./...
+
   goreleaser:
+    needs: test
+    # `release` requires a tagged commit, so only run it for tag pushes
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
